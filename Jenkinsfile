@@ -1,23 +1,54 @@
 pipeline {
-    agent any
-    stages {
-    
-    stage('Build Application') {
+	agent any 
+	environment {
+		PROJECT_ID = 'devopspipeline-265021'
+		CLUSTER_NAME = 'kube-demo'
+		LOCATION = 'us-central1-c'
+		CREDENTIALS_ID = 'kubernetes'
+	}
+	stages {
+		stage ("Checkout code") {
+			steps {
+				checkout scm 
+			}
+		}
+		stage ("Build") {
+			steps {
+				echo "cleaning and packaging"
+				sh 'mvn clean package'
+			}
+		}
+		stage ("Test") {
+			steps {
+				echo "Testing"
+				sh 'mvn test'
+			}
+		}
+		stage("Build image") {
             steps {
-                sh 'gradle clean build'
-            }
-            post {
-                success { 
-                    echo "Now Archiving the Artificates"
-                    archiveArtificats artifacts: 'build/libs/*.war'
-                }        
+                script {
+                    myapp = docker.build("muthut20/kuberepos:${env.BUILD_ID}")
+                }
             }
         }
-        
-        stage('Create Docker image') {
+        stage("Push image") {
             steps {
-                sh  "docker build . -t tomcatdemoweb:${env.BUILD_ID}
+                script {
+                    docker.withRegistry('https://registry.hub.docker.com', 'docker_muthu') {
+                            myapp.push("${env.BUILD_ID}")
+                    }
+                }
+            }
+        }        
+        stage('Deploy to Google Kubernetes') {
+            steps{
+			    echo "Deployment started"
+				sh 'ls -ltr'
+				sh 'pwd'
+                sh "sed -i 's/tagversion/${env.BUILD_ID}/g' deployment.yaml"
+                step([$class: 'KubernetesEngineBuilder', projectId: env.PROJECT_ID, clusterName: env.CLUSTER_NAME, location: env.LOCATION, manifestPattern: 'deployment.yaml', credentialsId: env.CREDENTIALS_ID, verifyDeployments: true])
+				echo "Deployment Finished"
             }
         }
-    }
+    }    
 }
